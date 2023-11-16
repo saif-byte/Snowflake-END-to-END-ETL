@@ -1,0 +1,100 @@
+-- creating database
+create database flight_delays_db;
+use database flight_delays_db;
+
+-- creating schemas
+create or replace schema landing;
+create or replace schema curated;
+create or replace schema consumption;
+
+--loading table done via UI.
+use schema LANDING;
+show tables ; 
+
+
+-- creating integration with s3
+
+CREATE OR REPLACE STORAGE INTEGRATION s3_int
+  TYPE = EXTERNAL_STAGE
+  STORAGE_PROVIDER = 'S3'
+  ENABLED = TRUE
+  STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::642725543076:role/snowflake-flight-delay-role'
+  STORAGE_ALLOWED_LOCATIONS = ('s3://flight-delay-dataset/Flight Delay/')
+;
+
+desc integration s3_int;
+
+-- creating stages
+
+create or replace stage flight_stage 
+storage_integration = s3_int
+url = 's3://flight-delay-dataset/Flight Delay/flights_data'
+comment = "flight stage";
+
+
+create or replace  stage airport_stage 
+storage_integration = s3_int
+url = 's3://flight-delay-dataset/Flight Delay/airports_data'
+comment = "airport stage";
+
+create or replace  stage airline_stage 
+storage_integration = s3_int
+url = 's3://flight-delay-dataset/Flight Delay/airlines_data'
+comment = "airline stage";
+
+-- creating pipes
+
+create or replace pipe flight_pipe
+auto_ingest = TRUE
+as
+copy into flights from @flight_stage
+ON_ERROR = 'CONTINUE';
+
+create or replace pipe airport_pipe
+auto_ingest = TRUE
+as
+copy into airports from @airport_stage
+file_format = (type = csv , compression = None)
+ON_ERROR = 'CONTINUE';
+
+create or replace pipe airline_pipe
+auto_ingest = TRUE
+as
+copy into airlines from @airline_stage
+ON_ERROR = 'CONTINUE';
+
+show pipes;
+
+-- creating streams
+
+create stream flight_stream on table flights
+append_only = TRUE;
+
+create stream airport_stream on table airports
+append_only = TRUE;
+
+create stream airline_stream on table airlines
+append_only = TRUE;
+
+
+alter pipe flight_pipe SET PIPE_EXECUTION_PAUSED = true;
+alter pipe airline_pipe REFRESH;
+
+show streams;
+
+select count(*) from flights;
+select count(*) from airlines;
+
+select * from FLIGHT_STREAM;
+
+select * from AIRLINE_STREAM;
+
+select * from AIRPORT_STREAM;
+
+list @airline_stage;
+
+SELECT SYSTEM$PIPE_STATUS('flight_pipe');
+SELECT SYSTEM$PIPE_STATUS('airline_pipe');
+
+select count($1) from @flight_stage;
+
